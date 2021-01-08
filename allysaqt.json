@@ -1,0 +1,21 @@
+{
+    "settings" : {
+        "global": {
+            "settings": {
+                "prefix": "a$"
+            }
+        },
+        "692647317425094686": {
+            "settings": {
+                "prefix": "a$"
+            }
+        }
+    },
+    "commands": {
+        "global": {
+            "hi hello hey": {
+                "content": "Hiii qt!"
+            }
+        }
+    }
+}

@@ -99,7 +99,7 @@ def merge_dict(source, destination): # note: in python 3.9, operator `|=` exists
             merge_dict(value, node)
         else:
             destination[key] = value
-    return destination
+    return destination # only when needed to copy on another variable, as this function overwrites destination
 
 
 def make_dict(**kwargs):
