@@ -59,14 +59,26 @@ class MEMORY:
 
 class CMD:
     def __new__(cls):
-        return MEMORY['commands']
-    
+        return MEMORY()['commands']
+    def if_global(command):
+        if command in MEMORY.database['commands']['global']:
+            return True
+    def if_local(ctx, command):
+        if ctx.guild.id in MEMORY()['commands']:
+            if command in MEMORY()['commands'][ctx.guild.id]:
+                return True
+        MEMORY()['commands'][ctx.guild.id][command]
+    def if_unused(ctx, command):
+        if CMD.if_global(command) or CMD.if_local(ctx, command):
+            return False
+        else:
+            return True
 
 def command_prefix(bot, ctx):
     try:
-        return MEMORY['settings'][ctx.guild.id]['prefix']
+        return MEMORY['settings'][ctx.guild.id]['prefix'] # type: ignore
     except KeyError:
-        return MEMORY['settings']['global']['prefix']
+        return MEMORY['settings']['global']['prefix'] # type: ignore
 
 BOT = commands.Bot(command_prefix=command_prefix)
 
@@ -83,8 +95,7 @@ async def on_message(message):
 @BOT.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
-        try:
-            command = 
+        pass
 
 @BOT.command(aliases=['set'])
 async def settings(ctx, *args):

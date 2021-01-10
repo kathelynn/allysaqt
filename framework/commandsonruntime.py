@@ -40,7 +40,7 @@ def create(command, ctx=None, guild_id=None, **kwargs):
                 json[item] = kwargs[item]
             except:
                 pass
-    if json:
+    if 'json' in locals(): 
         loadstufftomemory.access(guild_id=guild_id, mode='w*', category='commands',
                              item=command, value=json)
     else: raise TypeError('JSON cannot be empty')
