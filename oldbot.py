@@ -81,6 +81,7 @@ async def settings(ctx, arg=None, arg2=None):
 @BOT.command(aliases=['ccommands', 'cc'])
 async def customcommands(ctx, args=None):
     '''Custom commands command'''
+    path = args
     try:
         while path:
             embed = {}
@@ -113,18 +114,18 @@ async def customcommands(ctx, args=None):
                 botmsg = await ctx.send(embed=discord.Embed.from_dict(embed))
             
             
-                if choices and path not in choices:
-                    for i in range(0, len(choices)):
-                        await botmsg.add_reaction(EMBED_BUTTONS[i])
-                    await botmsg.add_reaction('❎')
-                    def check(reaction, user):
-                        return str(reaction.emoji) in EMBED_BUTTONS + ['❎'] and user == ctx.author and reaction.message == ctx.message
-                    reaction = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
-                    path = EMBED_BUTTONS.index(str(reaction.emoji))
-                    path = choices[path]
-                    del choices
-                else:
-                    break
+            if choices and path not in choices:
+                for i in range(0, len(choices)):
+                    await botmsg.add_reaction(EMBED_BUTTONS[i])
+                await botmsg.add_reaction('❎')
+                def check(reaction, user):
+                    return str(reaction.emoji) in EMBED_BUTTONS + ['❎'] and user == ctx.author and reaction.message == ctx.message
+                reaction = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
+                path = EMBED_BUTTONS.index(str(reaction.emoji))
+                path = choices[path]
+                del choices
+            else:
+                break
     except Exception as e:
         if isinstance(e, asyncio.TimeoutError):
             e = 'Timeout'
