@@ -8,7 +8,8 @@ If you still want to run this bot locally, please do the following by order:
     "token": "TOKEN HERE",
     "filename":"allysaqt.json",
     "defaultprefix":"a$",
-    "autosaveinterval":10,
+    "autosave":true,
+    "autosaveinterval":1,
     "embedtimeout":15
 }
 ```

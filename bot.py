@@ -53,19 +53,43 @@ class MEMORY:
         return MEMORY.database
     def merge(path, value):
             append = {}
-            node = nested_dict(path[:-1].split('/'), append)
+            path = path.split('/')
+            node = nested_dict(path[:-1], append)
             node[path[-1]] = value
             merge_dict(append, MEMORY.database)
 
 class CMD:
+    def __new__(cls, ctx=None, command=None):
+        if command:
+            command = ctx.message.content[len(ctx.prefix):].split()
+            if command > 1:
+                args = command[1:]
+            command[0] = command[0].upper()
+        if ctx and command:
+            for key, value in MEMORY()[ctx.guild.id]['commands'].items():
+                if command[0] in key:
+                    return value
+            raise KeyError(f'Command `{command}`')
+        elif command:
+            for key,value in MEMORY()['global']['commands'].items():
+                if command[0] in key:
+                    return value
+            raise KeyError(f'Command `{command}`')
+        elif ctx:
+            return MEMORY()[str(ctx.guild.id)]
+        else:
+            pass
+        
     def if_global(command):
-        if command in MEMORY()['commands']['global']:
-            return True
-    def if_local(ctx, command):
-        if ctx.guild.id in MEMORY()['commands']:
-            if command in MEMORY()['commands'][ctx.guild.id]:
+        for key, value in MEMORY()['global']['commands'].items():
+            if command in key:
                 return True
-        MEMORY()['commands'][ctx.guild.id][command]
+        return False
+    def if_local(ctx, command):
+        for key,value in MEMORY()[str(ctx.guild.id)]['commands'].items():
+            if command in key:
+                return True
+        return False
     def if_unused(ctx, command):
         if CMD.if_global(command) or CMD.if_local(ctx, command):
             return False
@@ -74,7 +98,7 @@ class CMD:
 
 def command_prefix(bot, ctx):
     try:
-        return MEMORY()[ctx.guild.id]['settings']['prefix'] # type: ignore
+        return MEMORY()[str(ctx.guild.id)]['settings']['prefix'] # type: ignore
     except KeyError:
         return MEMORY()['global']['settings']['prefix'] # type: ignore
 
@@ -122,23 +146,27 @@ async def interactive_embed(ctx, botmsg, choices):
     def check(reaction, user):
         print(user.id)
         print(reaction.message.id)
-        return str(reaction.emoji) in buttons and user.id == ctx.author.id and reaction.message.id == ctx.message.id
+        return str(reaction.emoji) in buttons and user.id == ctx.author.id and reaction.message.id == botmsg.id
     reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
     emoji = str(reaction.emoji)
 
     if emoji == '✏':
+        await botmsg.clear_reactions()
+        embed = {'description': choices.description}
+        await botmsg.edit(embed=discord.Embed(description=choices.description))
         def check(message):
-            return message.author == ctx.author and message.channel == ctx.channel
+            return message.author == ctx.author and message.channel == botmsg.channel
         message = await BOT.wait_for('message', check=check, timeout=EMBED_TIMEOUT)
         return message.content
     elif emoji == '❎':
-        botmsg.clear_reactions
+        await botmsg.clear_reactions()
+        return -1
     else:
         path = buttons.index(emoji)
         return choices[path]
 
 @BOT.command(aliases=['set'])
-async def settings(ctx, *args):
+async def settings(ctx, *args, botmsg=None):
     try:
         embed = {}
         choices = []
@@ -160,13 +188,12 @@ async def settings(ctx, *args):
                         "value": f"{ctx.prefix}set prefix [input]"
                     },
                     {
-                        "name": "2️⃣ Error Messages",
-                        "value": f"{str(True)}" ###
+                        "name": "2️⃣ Unknown Command Error",
+                        "value": f"Coming soon" ###
                     }
                 ]
             }
-        elif args == 2 and args[0] == 'prefix':
-            prefix = ctx.prefix
+        elif len(args) < 3 and args[0] == 'prefix':
             if len(args) < 2:
                 if ctx.author.guild_permissions.manage_guild:
                     choices = userinput('Change the command')
@@ -176,12 +203,12 @@ async def settings(ctx, *args):
                         "icon_url": str(guild_icon)
                     },
                     "title": "Prefix",
-                    "description": f"*{prefix}*"
+                    "description": f"*{ctx.prefix}*"
                 }
             else:
                 if not ctx.author.guild_permissions.manage_guild:
                     raise Exception('`manage_guild` permission missing') ###
-                elif prefix == args[1]:
+                elif ctx.prefix == args[1]:
                     raise Exception('Pick a different prefix') ###
                 elif len(args[1]) > 3:
                     raise Exception('Arg is too long') ###
@@ -189,16 +216,17 @@ async def settings(ctx, *args):
                     for character in args[1]:
                         if character not in string.hexdigits + string.punctuation:
                             raise Exception(f'Invalid character {character}') ###
-                    MEMORY.merge(f'{ctx.guild.id}/settings/prefix', args[1])
+                    MEMORY.merge(f'{str(ctx.guild.id)}/settings/prefix', args[1])
                     embed = {
-                        "description": f"Prefix for this server has been changed to `{MEMORY()[ctx.guild.id]['settings']['prefix']}`.",
+                        "description": f"Prefix for this server has been changed to `{MEMORY()[str(ctx.guild.id)]['settings']['prefix']}`.",
                         "color": 65280
                     }
         else:
             raise Exception('Arguments are incorrect')
         
         embed = discord.Embed.from_dict(embed)
-        if 'botmsg' in locals():
+        print(botmsg)
+        if botmsg:
             await botmsg.clear_reactions()
             await botmsg.edit(embed=embed)
         else:
@@ -206,8 +234,8 @@ async def settings(ctx, *args):
 
         if choices:
             path = await interactive_embed(ctx, botmsg, choices)
-            await ctx.send(path)
-            await settings(ctx, *args, path)
+            if path != -1:
+                await settings(ctx, *args, path, botmsg=botmsg)
 
     except Exception as e:
         if isinstance(e, asyncio.TimeoutError):
