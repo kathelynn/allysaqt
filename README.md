@@ -19,7 +19,8 @@ If you still want to run this bot locally, please do the following by order:
 {
     "global": {
         "settings": {
-            "prefix": "a$"
+            "command_prefix": "a$",
+            "command_error": false
         }, 
         "commands": {
             "ping": {
