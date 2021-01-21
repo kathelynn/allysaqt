@@ -31,7 +31,7 @@ async def autosave(memory, file, interval=None):
         
 CONFIG = loaddisk('config.json')
 
-'''Dict modifiers'''
+'''Special functions'''
 
 def merge_dict(source, destination):
     for key, value in source.items():
@@ -49,13 +49,28 @@ def nested_dict(source, destination):
         destination[source[0]] = {}
         return destination[source[0]]
 
+def str_bool(string):
+    _type = type(string)
+    if string is bool:
+        return string
+    elif string is str:
+        string = string.lower()
+        if string in ['true', 't', 'yes', 'y', 'on']:
+            return True
+        elif string in ['false', 'f', 'no', 'n', 'off']:
+            return False
+        else:
+            raise TypeError('str_bool() argument must be a boolean string, not ' + string)
+    else:
+        raise TypeError('str_bool() cannot')
+
 '''Bot database'''
 
 class MEMORY:
     database = loaddisk(CONFIG['filename'])
     def __new__(cls):
         return MEMORY.database
-    def merge(path, value):
+    def overwrite(path, value):
             append = {}
             path = path.split('/')
             node = nested_dict(path[:-1], append)
@@ -219,32 +234,97 @@ async def settings(ctx, *args, botmsg=None):
     try:
         embed = {}
         userinput = []
-
         guild_id = str(ctx.guild.id)
-        guild_icon = str(ctx.guild.icon_url)
-        
-        def str_bool(string):
-            _type = type(string)
-            if string is bool:
-                return string
-            elif string is str:
-                string = string.lower()
-                if string in ['true', 't', 'yes', 'y', 'on']:
-                    return True
-                elif string in ['false', 'f', 'no', 'n', 'off']:
-                    return False
-                else:
-                    raise TypeError('str_bool() argument must be a boolean string, not ' + string)
-            else:
-                raise TypeError('str_bool() cannot')
 
+        def prefix(new):
+            if ctx.prefix == new:
+                raise Exception('Pick a different prefix') ###
+            for character in new:
+                if character not in string.hexdigits + string.punctuation:
+                    raise Exception(f'Invalid character {character}') ###
+            MEMORY.overwrite(f'{guild_id}/settings/command_prefix', new)
+            return {
+                "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['command_prefix']}`.",
+                "color": 65280
+            }
+        
+        def cmdalerts(new):
+            try:
+                MEMORY.overwrite(f'{guild_id}/settings/command_error', str_bool(new))
+                return {
+                    "description": f"Command alerts for this server is set to `{MEMORY()[guild_id]['settings']['command_error']}`.",
+                    "color": 65280
+                }
+            except TypeError:
+                raise TypeError(f'{args[1]} not an accepted value') ###
+
+        ### work in progress
+        template = {
+            "header": {
+                "name": ctx.guild.name,
+                "icon_url": ctx.guild.icon_url
+            },
+            "default": {
+                "embed": {
+                    "title": "Settings",
+                    "description": f"{ctx.prefix}set ..."
+                },
+                "links": ['prefix', 'cmdalerts']
+            },
+            "prefix": {
+                "title": "Prefix",
+                "icon": "1️⃣",
+                "info": f"{ctx.prefix}",
+                "action": {
+                    "permission": ctx.author.guild_permissions.manage_guild,
+                    "do": "prefix"
+                }
+            },
+            "cmdalerts": {
+                "title": "Command Alerts",
+                "icon": "2️⃣",
+                "info":  f"{setting(ctx, 'command_error')}",
+                "action": {
+                    "permission": ctx.author.guild_permissions.manage_guild,
+                    "do": "cmdalerts"
+                }
+            }
+        }
+
+        if not args:
+            embed = template['default']
+            embed['fields'] = []
+            for name in template['links']:
+                embed['fields'].append({
+                    "name": f"{template[name]['icon']} {template[name]['title']}",
+                    "value": f"{name} {template[name]['info']}"
+                })
+        else:
+            def a(*args, template={}):
+                try:
+                    for arg in args:
+                        if arg in template:
+                            template = template[arg]
+                        else:
+                            if 'action' in template and template['action']['permission']:
+                                template = template['action']
+                                while ctx.channel.typing():
+                                    exec(f"{template['do']}(*{args[args.index(arg):]})") ### will probably need a faster initiative
+                                    botmsg = None
+                    
+            a(args, template=template)
+                            
+                    
+
+        embed['author'] = template['header']
+        
         if not args:
             userinput = [('1️⃣', 'prefix'), ('2️⃣', 'cmdalerts')]
             prefix = ctx.prefix
-            embed += {
+            embed = {
                 "author": {
                     "name": ctx.guild.name,
-                    "icon_url": guild_icon
+                    "icon_url": ctx.guild.icon_url
                 },
                 "title": "Settings",
                 "description": f"{prefix}set ",
@@ -267,9 +347,9 @@ async def settings(ctx, *args, botmsg=None):
                     embed = {
                         "author": {
                             "name": f"{ctx.guild.name} / Settings ",
-                            "icon_url": guild_icon
+                            "icon_url": ctx.guild.icon_url
                         },
-                        "title": "Prefix"
+                        "title": "Prefix",
                         "description": f"*{ctx.prefix}*"
                     }
                 else:
@@ -283,7 +363,7 @@ async def settings(ctx, *args, botmsg=None):
                         for character in args[1]:
                             if character not in string.hexdigits + string.punctuation:
                                 raise Exception(f'Invalid character {character}') ###
-                        MEMORY.merge(f'{guild_id}/settings/command_prefix', args[1])
+                        MEMORY.overwrite(f'{guild_id}/settings/command_prefix', args[1])
                         embed = {
                             "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['prefix']}`.",
                             "color": 65280
@@ -296,28 +376,29 @@ async def settings(ctx, *args, botmsg=None):
                         embed = {
                             "author": {
                                 "name": f"{ctx.guild.name} / Command Alerts",
-                                "icon_url": str(guild_icon)
+                                "icon_url": str(ctx.guild.icon_url)
                             },
                             "description": f"{setting(ctx, 'command_error')}"
                         }
                 else:
                     try:
-                        MEMORY.merge(f'{guild_id}/settings/command_error', str_bool(args[1]))
+                        MEMORY.overwrite(f'{guild_id}/settings/command_error', str_bool(args[1]))
                     except TypeError:
                         raise TypeError(f'{args[1]} not an accepted value') ###
                         
         else:
             raise Exception('Arguments are incorrect')
         
-        embed = discord.Embed.from_dict(embed)
-        if botmsg:
-            await botmsg.clear_reactions()
-            await botmsg.edit(embed=embed)
-        else:
-            botmsg = await ctx.send(embed=embed)
+        if embed:
+            embed = discord.Embed.from_dict(embed)
+            if botmsg:
+                await botmsg.clear_reactions()
+                await botmsg.edit(embed=embed)
+            else:
+                botmsg = await ctx.send(embed=embed)
         
         if userinput:
-            path, botmsg = await interactive_embed(ctx, botmsg, path, userinput)
+            path, botmsg = await interactive_embed(ctx, botmsg, args, userinput)
             if path == '..':
                 await settings(ctx, *args[:-1], botmsg=botmsg)
             elif path:
