@@ -181,24 +181,23 @@ async def on_command_error(ctx, error):
         
 EMBED_TIMEOUT = CONFIG['embedtimeout']
 
-class userinput:
+class a:
     class emote:
         pass
     class text:
         pass
-    def __init__(self, input_type, info):
+    def __init__(self, input_type, info, up=False):
         self.type = input_type
         self.info = info
+        self.up = up
 
-async def interactive_embed(cls, ctx, botmsg, path, userinput):
+async def interactive_embed(ctx, botmsg, path, userinput):
     buttons = []
     # replace isinstance with classes 
-    if userinput.type is userinput.emote:
-        try:
-            userinput.remove('..')
+    if userinput.type is a.emote:
+        if userinput.up:
             buttons += ['◀']
-        except: pass
-        buttons += [button[0] for button in userinput] + ['❎']
+        buttons += [button for button in userinput.info] + ['❎']
     elif userinput.type is userinput.text:
         buttons = ['✏', '◀', '❎']
     else:
@@ -207,7 +206,7 @@ async def interactive_embed(cls, ctx, botmsg, path, userinput):
     for reaction in buttons:
         await botmsg.add_reaction(reaction)
     def check(reaction, user):
-        return str(reaction.emoji) in buttons and user is ctx.author and reaction.message is botmsg
+        return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id is botmsg.id
     reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
     emoji = str(reaction.emoji)
 
@@ -226,14 +225,13 @@ async def interactive_embed(cls, ctx, botmsg, path, userinput):
         await botmsg.clear_reactions()
         return 0, botmsg
     else:
-        path = buttons.index(emoji)
-        return userinput[path], botmsg
+        return userinput.info[emoji], botmsg
 
 @BOT.command(aliases=['set'])
 async def settings(ctx, *args, botmsg=None):
     try:
         embed = {}
-        userinput = []
+        userinput = None
         guild_id = str(ctx.guild.id)
 
         def prefix(new):
@@ -246,7 +244,7 @@ async def settings(ctx, *args, botmsg=None):
             return {
                 "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['command_prefix']}`.",
                 "color": 65280
-            }
+            })
         
         def cmdalerts(new):
             try:
@@ -261,8 +259,8 @@ async def settings(ctx, *args, botmsg=None):
         ### work in progress
         template = {
             "header": {
-                "name": ctx.guild.name,
-                "icon_url": ctx.guild.icon_url
+                "name": f"{' / '.join([x.title() for x in (ctx.guild.name,) + args])}",
+                "icon_url": str(ctx.guild.icon_url)
             },
             "default": {
                 "embed": {
@@ -277,7 +275,7 @@ async def settings(ctx, *args, botmsg=None):
                 "info": f"{ctx.prefix}",
                 "action": {
                     "permission": ctx.author.guild_permissions.manage_guild,
-                    "do": "prefix"
+                    "do": prefix
                 }
             },
             "cmdalerts": {
@@ -286,118 +284,122 @@ async def settings(ctx, *args, botmsg=None):
                 "info":  f"{setting(ctx, 'command_error')}",
                 "action": {
                     "permission": ctx.author.guild_permissions.manage_guild,
-                    "do": "cmdalerts"
+                    "do": cmdalerts
                 }
             }
         }
 
         if not args:
-            embed = template['default']
+            embed = template['default']['embed']
             embed['fields'] = []
-            for name in template['links']:
-                embed['fields'].append({
-                    "name": f"{template[name]['icon']} {template[name]['title']}",
+            userinput = a(a.emote, {})
+            for name in template['default']['links']:
+                icon = template[name]['icon']
+                userinput.info[icon] = name
+                embed['fields'].append( {
+                    "name": f"{icon} {template[name]['title']}",
                     "value": f"{name} {template[name]['info']}"
-                })
+                } )
         else:
-            def a(*args, template={}):
-                try:
-                    for arg in args:
-                        if arg in template:
-                            template = template[arg]
-                        else:
-                            if 'action' in template and template['action']['permission']:
-                                template = template['action']
-                                while ctx.channel.typing():
-                                    exec(f"{template['do']}(*{args[args.index(arg):]})") ### will probably need a faster initiative
-                                    botmsg = None
-                    
-            a(args, template=template)
-                            
-                    
+            navigate = template[args[0]]
+            for arg in args[1:]:
+                print('a')
+                if arg in navigate:
+                    navigate = navigate[arg]
+                else:
+                    if 'action' in navigate and navigate['action']['permission']:
+                        while ctx.channel.typing():
+                            botmsg = None
+                            embed = navigate['action']['do'](*args[args.index(arg):]) ### will probably need a faster initiative
+            if not embed:
+                embed = {
+                    "title": navigate['title'], 
+                    "description": navigate['info'] 
+                }   
 
         embed['author'] = template['header']
+        print(embed)
         
-        if not args:
-            userinput = [('1️⃣', 'prefix'), ('2️⃣', 'cmdalerts')]
-            prefix = ctx.prefix
-            embed = {
-                "author": {
-                    "name": ctx.guild.name,
-                    "icon_url": ctx.guild.icon_url
-                },
-                "title": "Settings",
-                "description": f"{prefix}set ",
-                "fields": [
-                    {
-                        "name": f"1️⃣ Prefix",
-                        "value": f"{prefix}set "
-                    },
-                    {
-                        "name": "2️⃣ Cmdalerts",
-                        "value":  f"Command alerts set to {not setting(ctx, 'command_error')}"
-                    }
-                ]
-            }
-        elif len(args) < 3:
-            if args[0] == 'prefix':
-                if len(args) < 2:
-                    if ctx.author.guild_permissions.manage_guild:
-                        userinput = 'Change the command'
-                    embed = {
-                        "author": {
-                            "name": f"{ctx.guild.name} / Settings ",
-                            "icon_url": ctx.guild.icon_url
-                        },
-                        "title": "Prefix",
-                        "description": f"*{ctx.prefix}*"
-                    }
-                else:
-                    if not ctx.author.guild_permissions.manage_guild:
-                        raise Exception('`manage_guild` permission missing') ###
-                    elif ctx.prefix == args[1]:
-                        raise Exception('Pick a different prefix') ###
-                    elif len(args[1]) > 3:
-                        raise Exception('Arg is too long') ###
-                    else:
-                        for character in args[1]:
-                            if character not in string.hexdigits + string.punctuation:
-                                raise Exception(f'Invalid character {character}') ###
-                        MEMORY.overwrite(f'{guild_id}/settings/command_prefix', args[1])
-                        embed = {
-                            "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['prefix']}`.",
-                            "color": 65280
-                        }
-            elif args[0] == 'cmdalerts':
-                command_error = setting(ctx, 'command_error')
-                if len(args) < 2:
-                    if ctx.author.guild_permissions.manage_guild:
-                        userinput = [not setting(ctx, 'command_error')]
-                        embed = {
-                            "author": {
-                                "name": f"{ctx.guild.name} / Command Alerts",
-                                "icon_url": str(ctx.guild.icon_url)
-                            },
-                            "description": f"{setting(ctx, 'command_error')}"
-                        }
-                else:
-                    try:
-                        MEMORY.overwrite(f'{guild_id}/settings/command_error', str_bool(args[1]))
-                    except TypeError:
-                        raise TypeError(f'{args[1]} not an accepted value') ###
+        # if not args:
+        #     userinput = [('1️⃣', 'prefix'), ('2️⃣', 'cmdalerts')]
+        #     prefix = ctx.prefix
+        #     embed = {
+        #         "author": {
+        #             "name": ctx.guild.name,
+        #             "icon_url": ctx.guild.icon_url
+        #         },
+        #         "title": "Settings",
+        #         "description": f"{prefix}set ",
+        #         "fields": [
+        #             {
+        #                 "name": f"1️⃣ Prefix",
+        #                 "value": f"{prefix}set "
+        #             },
+        #             {
+        #                 "name": "2️⃣ Cmdalerts",
+        #                 "value":  f"Command alerts set to {not setting(ctx, 'command_error')}"
+        #             }
+        #         ]
+        #     }
+        # elif len(args) < 3:
+        #     if args[0] == 'prefix':
+        #         if len(args) < 2:
+        #             if ctx.author.guild_permissions.manage_guild:
+        #                 userinput = 'Change the command'
+        #             embed = {
+        #                 "author": {
+        #                     "name": f"{ctx.guild.name} / Settings ",
+        #                     "icon_url": ctx.guild.icon_url
+        #                 },
+        #                 "title": "Prefix",
+        #                 "description": f"*{ctx.prefix}*"
+        #             }
+        #         else:
+        #             if not ctx.author.guild_permissions.manage_guild:
+        #                 raise Exception('`manage_guild` permission missing') ###
+        #             elif ctx.prefix == args[1]:
+        #                 raise Exception('Pick a different prefix') ###
+        #             elif len(args[1]) > 3:
+        #                 raise Exception('Arg is too long') ###
+        #             else:
+        #                 for character in args[1]:
+        #                     if character not in string.hexdigits + string.punctuation:
+        #                         raise Exception(f'Invalid character {character}') ###
+        #                 MEMORY.overwrite(f'{guild_id}/settings/command_prefix', args[1])
+        #                 embed = {
+        #                     "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['prefix']}`.",
+        #                     "color": 65280
+        #                 }
+        #     elif args[0] == 'cmdalerts':
+        #         command_error = setting(ctx, 'command_error')
+        #         if len(args) < 2:
+        #             if ctx.author.guild_permissions.manage_guild:
+        #                 userinput = [not setting(ctx, 'command_error')]
+        #                 embed = {
+        #                     "author": {
+        #                         "name": f"{ctx.guild.name} / Command Alerts",
+        #                         "icon_url": str(ctx.guild.icon_url)
+        #                     },
+        #                     "description": f"{setting(ctx, 'command_error')}"
+        #                 }
+        #         else:
+        #             try:
+        #                 MEMORY.overwrite(f'{guild_id}/settings/command_error', str_bool(args[1]))
+        #             except TypeError:
+        #                 raise TypeError(f'{args[1]} not an accepted value') ###
                         
+        # else:
+        #     raise Exception('Arguments are incorrect')
+        
+        embed = discord.Embed.from_dict(embed)
+        if botmsg:
+            await botmsg.clear_reactions()
+            await botmsg.edit(embed=embed)
         else:
-            raise Exception('Arguments are incorrect')
-        
-        if embed:
-            embed = discord.Embed.from_dict(embed)
-            if botmsg:
-                await botmsg.clear_reactions()
-                await botmsg.edit(embed=embed)
-            else:
-                botmsg = await ctx.send(embed=embed)
-        
+            botmsg = await ctx.send(embed=embed)
+    
         if userinput:
+            userinput.up = len(args) > 1
             path, botmsg = await interactive_embed(ctx, botmsg, args, userinput)
             if path == '..':
                 await settings(ctx, *args[:-1], botmsg=botmsg)
