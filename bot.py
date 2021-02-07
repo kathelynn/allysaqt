@@ -186,17 +186,12 @@ EMBED_TIMEOUT = CONFIG['embedtimeout']
 class interactive_embed:
     class reaction:
         def __init__(self, iterable, up=False):
-            self.iterable = iterable
+            self.reactions = iterable
             self.up = up
     class message:
         def __init__(self, message, up=False):
             self.message = message
             self.up = up
-
-    def initiate(self, input_type, info, up=False):
-        self.type = input_type
-        self.info = info
-        self.up = up
 
     async def __new__(cls, ctx, botmsg, path, userinput):
         buttons = []
@@ -204,7 +199,7 @@ class interactive_embed:
         if userinput.type is interactive_embed.reaction:
             if userinput.up:
                 buttons.append('◀')
-            buttons.append([button for button in itertools.chain(userinput.info, ['❎'])])
+            buttons.append([button for button in itertools.chain(userinput.reactions, ['❎'])])
         elif userinput.type is interactive_embed.message:
             buttons = ['✏', '◀', '❎']
         else:
@@ -219,7 +214,7 @@ class interactive_embed:
 
         if emoji == '✏':
             await botmsg.clear_reactions()
-            embed = {'description': userinput.description}
+            embed = {'description': userinput.message}
             await botmsg.edit(embed=discord.Embed(description=userinput.description))
             def check(message):
                 return message.author is ctx.author and message.channel is botmsg.channel
@@ -300,14 +295,15 @@ async def settings(ctx, *args, botmsg=None):
         if not args:
             embed = template['default']['embed']
             embed['fields'] = []
-            userinput = a(a.emote, {})
+            userinput = 
             for name in template['default']['links']:
                 icon = template[name]['icon']
-                userinput.info[icon] = name
+                userinput[] = name
                 embed['fields'].append( {
                     "name": f"{icon} {template[name]['title']}",
                     "value": f"{name} {template[name]['info']}"
                 } )
+            userinput = interactive_embed.reaction()
         else:
             navigate = template[args[0]]
             for arg in args[1:]:
