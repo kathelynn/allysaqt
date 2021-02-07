@@ -1,9 +1,11 @@
 import asyncio
 from os import sendfile
+from typing import Iterable
 import discord
 from discord import channel
 from discord.ext import commands
 import string
+import itertools
 
 '''File loader/saver'''
 
@@ -60,7 +62,7 @@ def str_bool(string):
         elif string in ['false', 'f', 'no', 'n', 'off']:
             return False
         else:
-            raise TypeError('str_bool() argument must be a boolean string, not ' + string)
+            raise TypeError(f'str_bool() argument must be a boolean string, not {string}')
     else:
         raise TypeError('str_bool() cannot')
 
@@ -181,51 +183,56 @@ async def on_command_error(ctx, error):
         
 EMBED_TIMEOUT = CONFIG['embedtimeout']
 
-class a:
-    class emote:
-        pass
-    class text:
-        pass
-    def __init__(self, input_type, info, up=False):
+class interactive_embed:
+    class reaction:
+        def __init__(self, iterable, up=False):
+            self.iterable = iterable
+            self.up = up
+    class message:
+        def __init__(self, message, up=False):
+            self.message = message
+            self.up = up
+
+    def initiate(self, input_type, info, up=False):
         self.type = input_type
         self.info = info
         self.up = up
 
-async def interactive_embed(ctx, botmsg, path, userinput):
-    buttons = []
-    # replace isinstance with classes 
-    if userinput.type is a.emote:
-        if userinput.up:
-            buttons += ['◀']
-        buttons += [button for button in userinput.info] + ['❎']
-    elif userinput.type is userinput.text:
-        buttons = ['✏', '◀', '❎']
-    else:
-        raise Exception() ###
-    
-    for reaction in buttons:
-        await botmsg.add_reaction(reaction)
-    def check(reaction, user):
-        return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id is botmsg.id
-    reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
-    emoji = str(reaction.emoji)
+    async def __new__(cls, ctx, botmsg, path, userinput):
+        buttons = []
+        # replace isinstance with classes 
+        if userinput.type is interactive_embed.reaction:
+            if userinput.up:
+                buttons.append('◀')
+            buttons.append([button for button in itertools.chain(userinput.info, ['❎'])])
+        elif userinput.type is interactive_embed.message:
+            buttons = ['✏', '◀', '❎']
+        else:
+            raise Exception() ###
+        
+        for reaction in buttons:
+            await botmsg.add_reaction(reaction)
+        def check(reaction, user):
+            return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id is botmsg.id
+        reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
+        emoji = str(reaction.emoji)
 
-    if emoji == '✏':
-        await botmsg.clear_reactions()
-        embed = {'description': userinput.description}
-        await botmsg.edit(embed=discord.Embed(description=userinput.description))
-        def check(message):
-            return message.author is ctx.author and message.channel is botmsg.channel
-        message = await BOT.wait_for('message', check=check, timeout=EMBED_TIMEOUT)
-        await message.delete(delay=0)
-        return message.content, botmsg
-    elif emoji == '◀':
-        return '..'
-    elif emoji == '❎':
-        await botmsg.clear_reactions()
-        return 0, botmsg
-    else:
-        return userinput.info[emoji], botmsg
+        if emoji == '✏':
+            await botmsg.clear_reactions()
+            embed = {'description': userinput.description}
+            await botmsg.edit(embed=discord.Embed(description=userinput.description))
+            def check(message):
+                return message.author is ctx.author and message.channel is botmsg.channel
+            message = await BOT.wait_for('message', check=check, timeout=EMBED_TIMEOUT)
+            await message.delete(delay=0)
+            return message.content, botmsg
+        elif emoji == '◀':
+            return '..'
+        elif emoji == '❎':
+            await botmsg.clear_reactions()
+            return 0, botmsg
+        else:
+            return userinput.info[emoji], botmsg
 
 @BOT.command(aliases=['set'])
 async def settings(ctx, *args, botmsg=None):
@@ -235,16 +242,17 @@ async def settings(ctx, *args, botmsg=None):
         guild_id = str(ctx.guild.id)
 
         def prefix(new):
-            if ctx.prefix == new:
+            if MEMORY()[guild_id]['settings']['command_prefix'] == new:
                 raise Exception('Pick a different prefix') ###
+            characters = f'{string.digits}{string.ascii_letters}{string.punctuation}'
             for character in new:
-                if character not in string.hexdigits + string.punctuation:
-                    raise Exception(f'Invalid character {character}') ###
+                if character not in characters:
+                    raise Exception(f'Invalid character {character}') ###   
             MEMORY.overwrite(f'{guild_id}/settings/command_prefix', new)
             return {
                 "description": f"Prefix for this server has been changed to `{MEMORY()[guild_id]['settings']['command_prefix']}`.",
                 "color": 65280
-            })
+            }
         
         def cmdalerts(new):
             try:
@@ -259,7 +267,7 @@ async def settings(ctx, *args, botmsg=None):
         ### work in progress
         template = {
             "header": {
-                "name": f"{' / '.join([x.title() for x in (ctx.guild.name,) + args])}",
+                "name": f"{' / '.join([x.title() for x in itertools.chain((ctx.guild.name,), args)])}",
                 "icon_url": str(ctx.guild.icon_url)
             },
             "default": {
@@ -308,7 +316,7 @@ async def settings(ctx, *args, botmsg=None):
                     navigate = navigate[arg]
                 else:
                     if 'action' in navigate and navigate['action']['permission']:
-                        while ctx.channel.typing():
+                        async with ctx.channel.typing():
                             botmsg = None
                             embed = navigate['action']['do'](*args[args.index(arg):]) ### will probably need a faster initiative
             if not embed:
