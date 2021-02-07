@@ -196,19 +196,19 @@ class interactive_embed:
     async def __new__(cls, ctx, botmsg, path, userinput):
         buttons = []
         # replace isinstance with classes 
-        if userinput.type is interactive_embed.reaction:
+        if isinstance(userinput, interactive_embed.reaction):
             if userinput.up:
                 buttons.append('◀')
-            buttons.append([button for button in itertools.chain(userinput.reactions, ['❎'])])
-        elif userinput.type is interactive_embed.message:
-            buttons = ['✏', '◀', '❎']
+            buttons = itertools.chain(buttons, [button for button in itertools.chain([key for key, value in userinput.reactions.items()], ['❎'])])
+        elif isinstance(userinput, interactive_embed.message):
+            buttons = itertools.chain(buttons, ['✏', '◀', '❎'])
         else:
             raise Exception() ###
         
         for reaction in buttons:
             await botmsg.add_reaction(reaction)
         def check(reaction, user):
-            return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id is botmsg.id
+            return str(reaction.emoji) in userinput.reactions and user.id is ctx.author.id and reaction.message.id is botmsg.id
         reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
         emoji = str(reaction.emoji)
 
@@ -227,7 +227,7 @@ class interactive_embed:
             await botmsg.clear_reactions()
             return 0, botmsg
         else:
-            return userinput.info[emoji], botmsg
+            return userinput.reactions[emoji], botmsg
 
 @BOT.command(aliases=['set'])
 async def settings(ctx, *args, botmsg=None):
@@ -295,19 +295,18 @@ async def settings(ctx, *args, botmsg=None):
         if not args:
             embed = template['default']['embed']
             embed['fields'] = []
-            userinput = 
+            userinput = {}
             for name in template['default']['links']:
                 icon = template[name]['icon']
-                userinput[] = name
+                userinput[icon] = name
                 embed['fields'].append( {
                     "name": f"{icon} {template[name]['title']}",
                     "value": f"{name} {template[name]['info']}"
                 } )
-            userinput = interactive_embed.reaction()
+            userinput = interactive_embed.reaction(userinput)
         else:
             navigate = template[args[0]]
             for arg in args[1:]:
-                print('a')
                 if arg in navigate:
                     navigate = navigate[arg]
                 else:
@@ -315,14 +314,22 @@ async def settings(ctx, *args, botmsg=None):
                         async with ctx.channel.typing():
                             botmsg = None
                             embed = navigate['action']['do'](*args[args.index(arg):]) ### will probably need a faster initiative
+                    if 'links' in navigate:
+                        for name in template['default']['links']:
+                            icon = template[name]['icon']
+                            userinput[icon] = name
+                            embed['fields'].append( {
+                                "name": f"{icon} {template[name]['title']}",
+                                "value": f"{name} {template[name]['info']}"
+                            } )
+                        userinput = interactive_embed.reaction(userinput)
             if not embed:
                 embed = {
                     "title": navigate['title'], 
                     "description": navigate['info'] 
-                }   
+                }
 
         embed['author'] = template['header']
-        print(embed)
         
         # if not args:
         #     userinput = [('1️⃣', 'prefix'), ('2️⃣', 'cmdalerts')]
