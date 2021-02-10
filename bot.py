@@ -105,7 +105,7 @@ async def on_ready():
 async def on_message(message):
     print(f'{message.author} from {message.channel}: {message.content}')
     if message.content == 'uwu':
-        message.channel.send('uwu~', reference=message)
+        await message.channel.send('uwu~', reference=message)
     await BOT.process_commands(message)
 
 class CMD:
