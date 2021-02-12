@@ -1,0 +1,4 @@
+{
+    "1": "CREATE TABLE IF NOT EXISTS prefixes (serverID text, prefix text)",
+    "2": "ALTER TABLE prefixes RENAME TO settings; ALTER TABLE settings RENAME COLUMN prefix TO command_prefix; ALTER TABLE settings ADD COLUMN command_error integer"
+}

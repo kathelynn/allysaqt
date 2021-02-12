@@ -1,4 +1,5 @@
 *.pyc
-*.json
+allysaqt.hjson
+config.hjson
 *.db
 oldbot.py

@@ -1,7 +1,22 @@
-import asyncio, itertools, string, sqlite3
+import asyncio, concurrent, itertools, string, sqlite3
 import discord
 from discord.ext import commands
-from json import load, dump
+from collections import OrderedDict
+class hjson:
+    from hjson import dump, load
+
+''' Automation '''
+
+from sys import argv
+if len(argv) > 1 and argv[1] == "setup":
+    print('Setting up...')
+    with open('setup/config_copy.hjson', 'r') as copy:
+        copy = copy.read()
+        with open('config.hjson', 'w') as f:
+            f.write(copy)
+    print('Done! Refer back to README to complete the process.')
+    exit()
+del argv
 
 '''File loader/saving'''
 
@@ -9,36 +24,48 @@ def loaddisk(file):
     try:
         with open(file) as f:
             print(f'{file} accessed!')
-            return load(f)
+            return hjson.load(f)
     except FileNotFoundError:
         print(f"""Please follow the instructions found in README.md,
         otherwise if error still occurs please report issues on GitHub.
         Missing file: {file}""")
 
 def loaddb(file):
+    print(f'{file} accessed!')
     return sqlite3.connect(file)
 
-def save(memory, file, db=None):
-    with open(file, 'w') as f:
-        print('Saving to disk..')
-        dump(memory, f, indent=4)
-        print('Saved successfully!')
+def save(json=None, file=None, db=None):
+    if json and file:
+        with open(file, 'w') as f:
+            print('Saving to disk..')
+            hjson.dump(json, f, indent=4)
+            print('Saved successfully!')
     if db:
         db.commit()
+
+async def autosave(json=None, file=None, interval=0, db=None):
+    interval = interval*60
+    while True:
+        await asyncio.sleep(interval)
+        save(json, file, db)
         
-CONFIG = loaddisk('config.json')
+CONFIG = loaddisk('config.hjson')
+with open(f"{CONFIG['setup_directory']}/config_copy.hjson", 'r') as f:
+    for key, value in hjson.load(f).items():
+        if key not in CONFIG:
+            CONFIG[key] = value
+            print(f'{key} is missing! Using values from config_copy.hjson. Please read README.md for more information.')
 
 '''Special functions'''
 
 def merge_dict(source, destination):
     for key, value in source.items():
-        try:
-            value.items()
-        except:
-            destination[key] = value
-        else:
+        if isinstance(value, dict):
             node = destination.setdefault(key, {})
             merge_dict(value, node)
+        else:
+            destination[key] = value
+            
 
 def nested_dict(source, destination):
     if len(source) > 1:
@@ -48,19 +75,29 @@ def nested_dict(source, destination):
         destination[source[0]] = {}
         return destination[source[0]]
 
+def str_bool(string):
+    s = string.casefold()
+    if s in ['true', 't', 'on']: return True
+    elif s in ['false', 'f', 'off']: return False
+    else: raise(f'`true`/`t`/`on` or `false`/`f`/`off`, not {s}') ###
+
 '''Bot memory'''
 
 class db:
     conn = loaddb(CONFIG['dbfilename'])
     cursor = conn.cursor()
-    tables = [('prefixes', 'serverID text, prefix char(3)')]
-    for table in tables:
-        cursor.execute(f'CREATE TABLE IF NOT EXISTS {table[0]}({table[1]});')
     def __new__(cls):
         return db.cursor
     def fetch(sql, *parameters):
-        db.cursor.execute(sql, *parameters)
-        return db.cursor.fetchone()
+        return db.cursor.execute(sql, *parameters) and db.cursor.fetchone()
+
+    current_ver = cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]
+    with open(f"{CONFIG['setup_directory']}/db_maintenance.hjson") as f:
+        for version, commands in hjson.load(f, object_pairs_hook=OrderedDict).items():
+            if current_ver < int(version):
+                cursor.executescript(commands)
+        cursor.execute(f'PRAGMA user_version = {version};')
+        print(cursor.execute('PRAGMA user_version') and cursor.fetchone())
 
 class json:
     json = loaddisk(CONFIG['filename'])
@@ -73,23 +110,23 @@ class json:
             node[path[-1]] = value
             merge_dict(append, json())
 
-async def autosave(memory, file, interval=None):
-    interval = interval*60
-    while True:
-        await asyncio.sleep(interval)
-        save(memory, file)
-
-def setting(ctx, item):
-    try:
-        return json()[str(ctx.guild.id)]['settings'][item] # type: ignore
-    except KeyError:
-        return json()['global']['settings'][item] # type: ignore
+class setting:
+    def __new__(cls, ctx, item):
+        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))
+        return owo[0] if owo else CONFIG[f'default{item}']
+        
+    def update(ctx, item, value, conditions):
+        guild_id = ctx.guild.id
+        owo = db.fetch('SELECT ? FROM settings WHERE serverID=?;', (item, guild_id))
+        if conditions(old=owo, new=value):
+            if owo:
+                db().execute(f'UPDATE settings SET {item}=? WHERE serverID=?;', (value, guild_id))
+            else:
+                db().execute(f'INSERT INTO settings ({item}, serverID) VALUES (?, ?);', (value, guild_id))
 
 def command_prefix(bot, ctx):
-    owo = db.fetch('SELECT prefix FROM prefixes WHERE serverID=?;', (ctx.guild.id,))
-    if not owo:
-        owo = CONFIG['defaultprefix']
-    return owo
+    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))
+    return owo[0] if owo else CONFIG['defaultcommand_prefix']
 
 '''Bot Logic'''
 
@@ -99,13 +136,11 @@ BOT = commands.Bot(command_prefix=command_prefix)
 async def on_ready():
     print(f'Logged on as {BOT.user} ({BOT.user.id})')
     if CONFIG['autosave']:
-        asyncio.create_task(autosave(json(), CONFIG['filename'], CONFIG['autosaveinterval']))
+        asyncio.create_task(autosave(json(), CONFIG['filename'], CONFIG['autosaveinterval'], db.conn))
 
 @BOT.event
 async def on_message(message):
     print(f'{message.author} from {message.channel}: {message.content}')
-    if message.content == 'uwu':
-        await message.channel.send('uwu~', reference=message)
     await BOT.process_commands(message)
 
 class CMD:
@@ -150,8 +185,7 @@ class CMD:
 
 @BOT.event
 async def on_command_error(ctx, error):
-    errortype = type(error)
-    if errortype is commands.CommandNotFound:
+    if isinstance(error, commands.CommandNotFound):
         try:
             output = CMD(ctx, ctx.message.content)
         except KeyError:
@@ -168,13 +202,16 @@ async def on_command_error(ctx, error):
             if 'embed' in send:
                 send['embed'] = discord.Embed.from_dict(send['embed'])
             await ctx.send(**send)
-    if errortype is asyncio.TimeoutError:
-        pass
-    else:
-        if setting(ctx, 'command_error'):
-                embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
-                await ctx.send(embed=embed)
-        raise error
+    elif setting(ctx, 'command_error'):
+        errortype = type(error)
+        if errortype is concurrent.futures._base.TimeoutError:
+            pass
+        else:
+            if setting(ctx, 'command_error'):
+                    embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
+                    await ctx.send(embed=embed)
+            repr(error)
+            raise error
 
 ### Playing around a bit here
 #@BOT.event
@@ -216,7 +253,16 @@ class interactive_embed:
         for reaction in buttons:
             tasks.add(asyncio.ensure_future(botmsg.add_reaction(reaction)))
         def check(reaction, user):
-            return str(reaction.emoji) in userinput.reactions and user.id is ctx.author.id and reaction.message.id is botmsg.id
+            print(str(reaction.emoji))
+            print(userinput.reactions)
+            print(str(reaction.emoji) in userinput.reactions)
+            print(user.id)
+            print(ctx.author.id)
+            print(user.id is ctx.author.id)
+            print(reaction.message.id)
+            print(botmsg.id)
+            print(reaction.message.id == botmsg.id)
+            return str(reaction.emoji) in userinput.reactions and user.id is ctx.author.id and reaction.message.id == botmsg.id
         reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
         emoji = str(reaction.emoji)
 
@@ -244,24 +290,24 @@ async def settings(ctx, *args, botmsg=None):
     guild_id = str(ctx.guild.id)
 
     def prefix(new):
-        owo = db.fetch('SELECT * FROM prefixes WHERE serverID=?', (str(ctx.guild.id),))
-        if owo == new:
-            raise Exception('Pick a different prefix') ###
-        characters = f'{string.digits}{string.ascii_letters}{string.punctuation}'
-        for character in new:
-            if character not in characters:
-                raise Exception(f'Invalid character {character}') ###
-        if owo:
-            db().execute('UPDATE prefixes SET prefix = ? WHERE serverID = ?;', (new, str(ctx.guild.id)))
-        else:
-            db().execute('INSERT INTO prefixes (prefix, serverID) VALUES (?, ?);', (new, str(ctx.guild.id)))
+        def conditions(old, new):
+            if old == new:
+                raise Exception('Pick a different prefix') ###
+            characters = f'{string.digits}{string.ascii_letters}{string.punctuation}'
+            if len(new) > 3:
+                raise Exception('3 too many')
+            for character in new:
+                if character not in characters:
+                    raise Exception(f'Invalid character {character}') ###
+            return True
+        setting.update(ctx, 'command_prefix', new, conditions)
         return {
-            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT prefix FROM prefixes WHERE serverID=?', (str(ctx.guild.id),))[0]}`.", # the index cleans up the tuple
+            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (str(ctx.guild.id),))[0]}`.", # the index cleans up the tuple
             "color": 65280
         }
     
     def cmdalerts(new):
-            json.overwrite(f'{guild_id}/settings/command_error', new)
+            settings.update(ctx, 'command_error', str_bool(new))
             return {
                 "description": f"Command alerts for this server is set to `{json()[guild_id]['settings']['command_error']}`.",
                 "color": 65280
@@ -357,5 +403,5 @@ async def settings(ctx, *args, botmsg=None):
         await botmsg.clear_reactions()
 
 import atexit
-atexit.register(save, json(), CONFIG['filename'], db=db.conn)
+atexit.register(save, json(), CONFIG['filename'], db.conn)
 BOT.run(CONFIG['token'])

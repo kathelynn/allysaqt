@@ -1,0 +1,21 @@
+{
+    /// Please make sure this file is included on .gitignore! 
+    "token": "TOKEN HERE",
+
+    /// File and databases
+    "filename":"allysaqt.hjson",
+    "dbfilename": "allysaqt.db",
+    "autosave":true,
+    "autosaveinterval":30,
+
+    /// Default bot settings for all servers
+    "defaultcommand_prefix":"a$",
+    "defaultcommand_error": true,
+    
+    /// For "interactive embeds"
+    "embedtimeout":15
+
+    /// Refrain from changing these unless you know what you're doing!
+    "setup_directory": "setup",
+    "db_maintenance": "db_maintenance"
+}
