@@ -1,5 +1,6 @@
 *.pyc
 allysaqt.hjson
+allysaqt.db-journal
 config.hjson
 *.db
 oldbot.py

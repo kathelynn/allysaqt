@@ -90,7 +90,8 @@ class db:
     def __new__(cls):
         return db.cursor
     def fetch(sql, *parameters):
-        return db.cursor.execute(sql, *parameters) and db.cursor.fetchone()
+        db.cursor.execute(sql, *parameters)
+        return db.cursor.fetchone()
 
     current_ver = cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]
     with open(f"{CONFIG['setup_directory']}/db_maintenance.hjson") as f:
@@ -98,7 +99,7 @@ class db:
             if current_ver < int(version):
                 cursor.executescript(commands)
         cursor.execute(f'PRAGMA user_version = {version};')
-        print(f"Database version: {cursor.execute('PRAGMA user_version') and cursor.fetchone()}")
+        print(f"Database version {cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]}")
 
 class json:
     json = loaddisk(CONFIG['filename'])
@@ -113,21 +114,21 @@ class json:
 
 class setting:
     def __new__(cls, ctx, item):
-        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))
-        return owo[0] if owo[0] else CONFIG[f'default{item}']
+        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))[0]
+        return owo if owo else CONFIG[f'default{item}']
         
-    def update(ctx, item, value, conditions):
+    def update(ctx, item, value, conditions=None):
         guild_id = ctx.guild.id
         owo = db.fetch('SELECT ? FROM settings WHERE serverID=?;', (item, guild_id))
-        if conditions(old=owo, new=value):
+        if conditions is None or conditions(old=owo, new=value):
             if owo:
                 db().execute(f'UPDATE settings SET {item}=? WHERE serverID=?;', (value, guild_id))
             else:
                 db().execute(f'INSERT INTO settings ({item}, serverID) VALUES (?, ?);', (value, guild_id))
 
 def command_prefix(bot, ctx):
-    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))
-    return owo[0] if owo[0] else CONFIG['defaultcommand_prefix']
+    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))[0]
+    return owo if owo else CONFIG['defaultcommand_prefix']
 
 '''Bot Logic'''
 
@@ -186,7 +187,9 @@ class CMD:
 
 @BOT.event
 async def on_command_error(ctx, error):
-    errortype = type(error) if error is not discord.ext.commands.errors.CommandInvokeError else type(error.__cause__)
+    errortype = type(error.__cause__) if hasattr(error, '__cause__') else type(error)
+    if errortype is concurrent.futures._base.TimeoutError:
+        pass
     if errortype is commands.CommandNotFound:
         try:
             output = CMD(ctx, ctx.message.content)
@@ -205,14 +208,11 @@ async def on_command_error(ctx, error):
                 send['embed'] = discord.Embed.from_dict(send['embed'])
             await ctx.send(**send)
     elif setting(ctx, 'command_error'):
-        if errortype is concurrent.futures._base.TimeoutError:
-            pass
-        else:
-            if setting(ctx, 'command_error'):
-                    embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
-                    await ctx.send(embed=embed)
-            print(errortype)
-            raise error
+        if setting(ctx, 'command_error'):
+                embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
+                await ctx.send(embed=embed)
+        print(errortype)
+        raise error
     else:
         repr(error)
         raise error
@@ -242,22 +242,22 @@ class interactive_embed:
             self.up = up
 
     async def __new__(cls, ctx, botmsg, userinput):
-        buttons = []
         # replace isinstance with classes 
         if isinstance(userinput, interactive_embed.reaction):
+            reactions = userinput.reactions
             if userinput.up:
-                buttons.append('◀')
-            buttons = itertools.chain(buttons, button for button in itertools.chain([key for key, value in userinput.reactions.items()], ['❎'])
+                reactions['◀'] = None
+            reactions['❎'] = None
         elif isinstance(userinput, interactive_embed.message):
-            buttons = itertools.chain(buttons, ['✏', '◀', '❎'])
+            reactions = {'✏': None, '◀': None, '❎': None}
         else:
             raise Exception() ###
         
         tasks = set()
-        for reaction in buttons:
+        for reaction, name in reactions.items():
             tasks.add(asyncio.ensure_future(botmsg.add_reaction(reaction)))
         def check(reaction, user):
-            return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id == botmsg.id
+            return str(reaction.emoji) in reactions and user.id is ctx.author.id and reaction.message.id == botmsg.id
         reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
         emoji = str(reaction.emoji)
 
@@ -297,14 +297,14 @@ async def settings(ctx, *args, botmsg=None):
             return True
         setting.update(ctx, 'command_prefix', new, conditions)
         return {
-            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (str(ctx.guild.id),))[0]}`.", # the index cleans up the tuple
+            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (ctx.guild.id,))[0]}`.", # the index cleans up the tuple
             "color": 65280
         }
     
     def cmdalerts(new):
-            settings.update(ctx, 'command_error', str_bool(new))
+            setting.update(ctx, 'command_error', str_bool(new))
             return {
-                "description": f"Command alerts for this server is set to `{json()[guild_id]['settings']['command_error']}`.",
+                "description": f"Command alerts for this server is set to `{bool(db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (ctx.guild.id,))[0])}`.",
                 "color": 65280
             }
 
@@ -333,7 +333,7 @@ async def settings(ctx, *args, botmsg=None):
         "cmdalerts": {
             "title": "Command Alerts",
             "icon": "2️⃣",
-            "info":  f"{setting(ctx, 'command_error')}",
+            "info":  f"{bool(setting(ctx, 'command_error'))}",
             "action": {
                 "permission": ctx.author.guild_permissions.manage_guild,
                 "do": cmdalerts
