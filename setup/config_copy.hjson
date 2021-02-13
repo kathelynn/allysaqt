@@ -13,7 +13,7 @@
     "defaultcommand_error": true,
     
     /// For "interactive embeds"
-    "embedtimeout":15
+    "embedtimeout":15,
 
     /// Refrain from changing these unless you know what you're doing!
     "setup_directory": "setup",

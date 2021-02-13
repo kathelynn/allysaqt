@@ -29,6 +29,7 @@ def loaddisk(file):
         print(f"""Please follow the instructions found in README.md,
         otherwise if error still occurs please report issues on GitHub.
         Missing file: {file}""")
+        exit()
 
 def loaddb(file):
     print(f'{file} accessed!')
@@ -97,7 +98,7 @@ class db:
             if current_ver < int(version):
                 cursor.executescript(commands)
         cursor.execute(f'PRAGMA user_version = {version};')
-        print(cursor.execute('PRAGMA user_version') and cursor.fetchone())
+        print(f"Database version: {cursor.execute('PRAGMA user_version') and cursor.fetchone()}")
 
 class json:
     json = loaddisk(CONFIG['filename'])
@@ -113,7 +114,7 @@ class json:
 class setting:
     def __new__(cls, ctx, item):
         owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))
-        return owo[0] if owo else CONFIG[f'default{item}']
+        return owo[0] if owo[0] else CONFIG[f'default{item}']
         
     def update(ctx, item, value, conditions):
         guild_id = ctx.guild.id
@@ -126,7 +127,7 @@ class setting:
 
 def command_prefix(bot, ctx):
     owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))
-    return owo[0] if owo else CONFIG['defaultcommand_prefix']
+    return owo[0] if owo[0] else CONFIG['defaultcommand_prefix']
 
 '''Bot Logic'''
 
@@ -185,7 +186,8 @@ class CMD:
 
 @BOT.event
 async def on_command_error(ctx, error):
-    if isinstance(error, commands.CommandNotFound):
+    errortype = type(error) if error is not discord.ext.commands.errors.CommandInvokeError else type(error.__cause__)
+    if errortype is commands.CommandNotFound:
         try:
             output = CMD(ctx, ctx.message.content)
         except KeyError:
@@ -203,15 +205,17 @@ async def on_command_error(ctx, error):
                 send['embed'] = discord.Embed.from_dict(send['embed'])
             await ctx.send(**send)
     elif setting(ctx, 'command_error'):
-        errortype = type(error)
         if errortype is concurrent.futures._base.TimeoutError:
             pass
         else:
             if setting(ctx, 'command_error'):
                     embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
                     await ctx.send(embed=embed)
-            repr(error)
+            print(errortype)
             raise error
+    else:
+        repr(error)
+        raise error
 
 ### Playing around a bit here
 #@BOT.event
@@ -243,7 +247,7 @@ class interactive_embed:
         if isinstance(userinput, interactive_embed.reaction):
             if userinput.up:
                 buttons.append('◀')
-            buttons = itertools.chain(buttons, [button for button in itertools.chain([key for key, value in userinput.reactions.items()], ['❎'])])
+            buttons = itertools.chain(buttons, button for button in itertools.chain([key for key, value in userinput.reactions.items()], ['❎'])
         elif isinstance(userinput, interactive_embed.message):
             buttons = itertools.chain(buttons, ['✏', '◀', '❎'])
         else:
@@ -253,16 +257,7 @@ class interactive_embed:
         for reaction in buttons:
             tasks.add(asyncio.ensure_future(botmsg.add_reaction(reaction)))
         def check(reaction, user):
-            print(str(reaction.emoji))
-            print(userinput.reactions)
-            print(str(reaction.emoji) in userinput.reactions)
-            print(user.id)
-            print(ctx.author.id)
-            print(user.id is ctx.author.id)
-            print(reaction.message.id)
-            print(botmsg.id)
-            print(reaction.message.id == botmsg.id)
-            return str(reaction.emoji) in userinput.reactions and user.id is ctx.author.id and reaction.message.id == botmsg.id
+            return str(reaction.emoji) in buttons and user.id is ctx.author.id and reaction.message.id == botmsg.id
         reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
         emoji = str(reaction.emoji)
 
