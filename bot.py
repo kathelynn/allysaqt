@@ -112,39 +112,6 @@ class json:
             node[path[-1]] = value
             merge_dict(append, json())
 
-class setting:
-    def __new__(cls, ctx, item):
-        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))[0]
-        return owo if owo else CONFIG[f'default{item}']
-        
-    def update(ctx, item, value, conditions=None):
-        guild_id = ctx.guild.id
-        owo = db.fetch('SELECT ? FROM settings WHERE serverID=?;', (item, guild_id))
-        if conditions is None or conditions(old=owo, new=value):
-            if owo:
-                db().execute(f'UPDATE settings SET {item}=? WHERE serverID=?;', (value, guild_id))
-            else:
-                db().execute(f'INSERT INTO settings ({item}, serverID) VALUES (?, ?);', (value, guild_id))
-
-def command_prefix(bot, ctx):
-    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))[0]
-    return owo if owo else CONFIG['defaultcommand_prefix']
-
-'''Bot Logic'''
-
-BOT = commands.Bot(command_prefix=command_prefix)
-
-@BOT.event
-async def on_ready():
-    print(f'Logged on as {BOT.user} ({BOT.user.id})')
-    if CONFIG['autosave']:
-        asyncio.create_task(autosave(json(), CONFIG['filename'], CONFIG['autosaveinterval'], db.conn))
-
-@BOT.event
-async def on_message(message):
-    print(f'{message.author} from {message.channel}: {message.content}')
-    await BOT.process_commands(message)
-
 class CMD:
     def __new__(cls, ctx=None, command=None):
         guild_id = str(ctx.guild.id)
@@ -155,7 +122,10 @@ class CMD:
             command[0] = command[0].lower()
 
         if ctx and command:
-            for key, value in json()[guild_id]['commands'].items():
+            print(command)
+            for key, value in itertools.chain(json()[guild_id]['commands'].items(), json()['global']['commands'].items()):
+                print(f'{key} {value}')
+                print(command[0])
                 if command[0] in key:
                     return value
             raise KeyError(f'Command `{command}`')
@@ -184,13 +154,42 @@ class CMD:
             return False
         else:
             return True
+class setting:
+    def __new__(cls, ctx, item):
+        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))
+        return owo if owo else CONFIG[f'default{item}']
+        
+    def update(ctx, item, value, conditions=None):
+        guild_id = ctx.guild.id
+        owo = db.fetch('SELECT ? FROM settings WHERE serverID=?;', (item, guild_id))
+        if conditions is None or conditions(old=owo, new=value):
+            if owo:
+                db().execute(f'UPDATE settings SET {item}=? WHERE serverID=?;', (value, guild_id))
+            else:
+                db().execute(f'INSERT INTO settings ({item}, serverID) VALUES (?, ?);', (value, guild_id))
+
+def command_prefix(bot, ctx):
+    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))
+    return owo if owo else CONFIG['defaultcommand_prefix']
+
+'''Bot Logic'''
+
+BOT = commands.Bot(command_prefix=command_prefix)
+
+@BOT.event
+async def on_ready():
+    print(f'Logged on as {BOT.user} ({BOT.user.id})')
+    if CONFIG['autosave']:
+        asyncio.create_task(autosave(json(), CONFIG['filename'], CONFIG['autosaveinterval'], db.conn))
+
+@BOT.event
+async def on_message(message):
+    print(f'{message.author} from {message.channel}: {message.content}')
+    await BOT.process_commands(message)
 
 @BOT.event
 async def on_command_error(ctx, error):
-    errortype = type(error.__cause__) if hasattr(error, '__cause__') else type(error)
-    if errortype is concurrent.futures._base.TimeoutError:
-        pass
-    if errortype is commands.CommandNotFound:
+    if isinstance(error, commands.CommandNotFound):
         try:
             output = CMD(ctx, ctx.message.content)
         except KeyError:
@@ -199,7 +198,7 @@ async def on_command_error(ctx, error):
                     await ctx.send(embed=embed)
         else:
             send = {}
-            items = ctx.message
+            items = {"authorname": ctx.author.name}
             for key, value in output.items():
                 # need to copy instead of pointing to output var'
                 if key in ['content','tts','embed','file']:
@@ -207,15 +206,19 @@ async def on_command_error(ctx, error):
             if 'embed' in send:
                 send['embed'] = discord.Embed.from_dict(send['embed'])
             await ctx.send(**send)
-    elif setting(ctx, 'command_error'):
-        if setting(ctx, 'command_error'):
-                embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
-                await ctx.send(embed=embed)
-        print(errortype)
-        raise error
     else:
-        repr(error)
-        raise error
+        errortype = type(error.__cause__) if hasattr(error, '__cause__') else type(error)
+        if errortype is concurrent.futures._base.TimeoutError:
+            pass
+        elif setting(ctx, 'command_error'):
+            if setting(ctx, 'command_error'):
+                    embed = discord.Embed.from_dict({'description':'An error occured', 'color':16711680}) ###
+                    await ctx.send(embed=embed)
+            print(errortype)
+            raise error
+        else:
+            repr(error)
+            raise error
 
 ### Playing around a bit here
 #@BOT.event
