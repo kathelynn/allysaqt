@@ -1,4 +1,5 @@
 {
-    "1": "CREATE TABLE IF NOT EXISTS prefixes (serverID text, prefix text)",
-    "2": "ALTER TABLE prefixes RENAME TO settings; ALTER TABLE settings RENAME COLUMN prefix TO command_prefix; ALTER TABLE settings ADD COLUMN command_error integer"
+    "1": "CREATE TABLE prefixes (serverID TEXT, prefix TEXT)",
+    "2": "ALTER TABLE prefixes RENAME TO settings; ALTER TABLE settings RENAME COLUMN prefix TO command_prefix; ALTER TABLE settings ADD COLUMN command_error INTEGER",
+    "3": "ALTER TABLE settings RENAME COLUMN serverID TO guildID; CREATE TABLE commands (command TEXT, type INTEGER, json TEXT, guildID TEXT, authorID TEXT); CREATE TABLE actions (command TEXT, message TEXT, links TEXT)"
 }

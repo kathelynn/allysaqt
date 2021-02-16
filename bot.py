@@ -80,7 +80,13 @@ def str_bool(string):
     s = string.casefold()
     if s in ['true', 't', 'on']: return True
     elif s in ['false', 'f', 'off']: return False
-    else: raise(f'`true`/`t`/`on` or `false`/`f`/`off`, not {s}') ###
+    else: return 0
+
+def bool_int(bool):
+    return 1 if bool is True else 0
+
+def intersperse(delimiter, sequence):
+    return itertools.islice(itertools.chain.from_iterable(zip(itertools.repeat(delimiter), sequence)), 1, None)
 
 '''Bot memory'''
 
@@ -120,12 +126,8 @@ class CMD:
             if len(command) > 1:
                 args = command[1:]
             command[0] = command[0].lower()
-
         if ctx and command:
-            print(command)
             for key, value in itertools.chain(json()[guild_id]['commands'].items(), json()['global']['commands'].items()):
-                print(f'{key} {value}')
-                print(command[0])
                 if command[0] in key:
                     return value
             raise KeyError(f'Command `{command}`')
@@ -156,20 +158,20 @@ class CMD:
             return True
 class setting:
     def __new__(cls, ctx, item):
-        owo = db.fetch(f'SELECT {item} FROM settings WHERE serverID=?;', (ctx.guild.id,))
+        owo = db.fetch(f'SELECT {item} FROM settings WHERE guildID=?;', (ctx.guild.id,))
         return owo if owo else CONFIG[f'default{item}']
         
     def update(ctx, item, value, conditions=None):
         guild_id = ctx.guild.id
-        owo = db.fetch('SELECT ? FROM settings WHERE serverID=?;', (item, guild_id))
+        owo = db.fetch('SELECT ? FROM settings WHERE guildID=?;', (item, guild_id))
         if conditions is None or conditions(old=owo, new=value):
             if owo:
-                db().execute(f'UPDATE settings SET {item}=? WHERE serverID=?;', (value, guild_id))
+                db().execute(f'UPDATE settings SET {item}=? WHERE guildID=?;', (value, guild_id))
             else:
-                db().execute(f'INSERT INTO settings ({item}, serverID) VALUES (?, ?);', (value, guild_id))
+                db().execute(f'INSERT INTO settings ({item}, guildID) VALUES (?, ?);', (value, guild_id))
 
 def command_prefix(bot, ctx):
-    owo = db.fetch('SELECT command_prefix FROM settings WHERE serverID=?;', (ctx.guild.id,))
+    owo = db.fetch('SELECT command_prefix FROM settings WHERE guildID=?;', (ctx.guild.id,))
     return owo if owo else CONFIG['defaultcommand_prefix']
 
 '''Bot Logic'''
@@ -281,43 +283,161 @@ class interactive_embed:
         else:
             return userinput.reactions[emoji], botmsg
 
-@BOT.command(aliases=['set'])
+    async def template(ctx, template, *args):
+        embed = {}
+        userinput = {}
+        if not args:
+            embed = template['main']['embed']
+            embed['fields'] = []
+            for name in template['main']['links']:
+                icon = template[name]['icon']
+                userinput[icon] = name
+                embed['fields'].append( {
+                    "name": f"{icon} {template[name]['title']}",
+                    "value": f"{name} {template[name]['info']}"
+                } )
+            userinput = interactive_embed.reaction(userinput)
+            embed['author'] = template['header']
+        else:
+            navigate = template[args[0]]
+            for arg in args[1:]:
+                if arg in navigate:
+                    navigate = navigate[arg]
+                elif 'links' in navigate and arg in template:
+                    navigate = template[arg]
+                elif 'children' in navigate and arg in navigate['children']:
+                    navigate = navigate['children'][arg]
+                elif 'action' in navigate and navigate['action']['permission']:
+                    async with ctx.channel.typing():
+                        botmsg = None
+                        embed = navigate['action']['do'](*args[args.index(arg):])
+                        break
+            if not embed:
+                embed = {
+                    "title": navigate['title'], 
+                    "description": navigate['info'] 
+                }
+            if 'children' in navigate:
+                embed['fields'] = []
+                navigate = navigate['children']
+                for name, dictionary in navigate.items():
+                    icon = dictionary['icon']
+                    title = dictionary['title']
+                    userinput[dictionary['icon']] = dictionary['title']
+                    embed['fields'].append( {
+                        "name": f"{icon} {title}",
+                        "value": f"{name} {dictionary['info']}"
+                    } )
+                userinput = interactive_embed.reaction(userinput)
+            if 'links' in navigate:
+                for name in navigate['links']:
+                    icon = template[name]['icon']
+                    userinput[icon] = name
+                    embed['fields'].append( {
+                        "name": f"{icon} {template[name]['title']}",
+                        "value": f"{name} {template[name]['info']}"
+                    } )
+                userinput = interactive_embed.reaction(userinput)
+            if 'action' in navigate and not navigate['action']['permission']:
+                embed['footer'] = {'text': 'Permission denied'} ###
+            embed['author'] = navigate['header'] if 'header' in navigate else template['header']
+        return embed, userinput
+
+@BOT.command(aliases=['m'])
+async def make(ctx, *args, botmsg=None):
+    template = {
+        "header": {
+            "name": "Make",
+            "icon": "https://cdn.discordapp.com/attachments/810752119119806494/811000553911746560/unknown.png"
+        },
+        "main": {
+            "embed": {
+                "title": "Make",
+                "description": f"Implement" ###
+            },
+            "links": ['actioncmd']
+        },
+        "actioncmd": {
+            "title": "Action Commands",
+            "icon": "💞",
+            "info": "Interact with everyone~", ###
+            "children": {
+                "suggest":{
+                    "title": "Suggest changes", 
+                    "icon": "📡", ###
+                    "info": "Suggest changes on existing commands"
+                },
+                "create": {
+                    "title": "Create new",
+                    "icon": "🔨",
+                    "info": "Create an action command"
+
+                },
+                "modify": {
+                    "title": "Modify existing",
+                    "icon": "🔧",
+                    "info": "Modify an action command"
+                },
+            }
+        }
+    }
+
+    embed, userinput = await interactive_embed.template(ctx, template, *args)
+    embed = discord.Embed.from_dict(embed)
+    
+    if botmsg:
+        await botmsg.edit(embed=embed)
+    else:
+        botmsg = await ctx.send(embed=embed)
+
+    if userinput:
+        userinput.up = len(args) > 0
+        path, botmsg = await interactive_embed(ctx, botmsg, userinput)
+        if path == '..':
+            await asyncio.create_task(make(ctx, *args[:-1], botmsg=botmsg))
+        elif path:
+            await asyncio.create_task(make(ctx, *args, path, botmsg=botmsg))
+        await botmsg.clear_reactions()
+
+
+@BOT.command(aliases=['set', 's'])
 async def settings(ctx, *args, botmsg=None):
-    embed = {}
-    userinput = None
     guild_id = str(ctx.guild.id)
 
     def prefix(new):
         def conditions(old, new):
             if old == new:
-                raise Exception('Pick a different prefix') ###
-            characters = f'{string.digits}{string.ascii_letters}{string.punctuation}'
+                raise Exception("Prefix remains unchanged") ###
             if len(new) > 3:
-                raise Exception('3 too many')
+                raise Exception("Prefixes are limited to 3 characters") ###
+            characters = f'{string.digits}{string.ascii_letters}{string.punctuation}'
             for character in new:
                 if character not in characters:
-                    raise Exception(f'Invalid character {character}') ###
+                    raise Exception("Prefix contains invalid characters") ###
             return True
         setting.update(ctx, 'command_prefix', new, conditions)
         return {
-            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (ctx.guild.id,))[0]}`.", # the index cleans up the tuple
+            "description": f"Prefix for this server has been changed to `{db.fetch('SELECT command_prefix FROM settings WHERE guildID=?', (ctx.guild.id,))[0]}`.", ###
             "color": 65280
         }
     
     def cmdalerts(new):
-            setting.update(ctx, 'command_error', str_bool(new))
-            return {
-                "description": f"Command alerts for this server is set to `{bool(db.fetch('SELECT command_prefix FROM settings WHERE serverID=?', (ctx.guild.id,))[0])}`.",
-                "color": 65280
-            }
+        new = str_bool(new)
+        if new:
+            setting.update(ctx, 'command_error', bool_int(new))
+        else: raise Exception(f'true/t/on or false/f/off, not `{ctx.message.content}`')
+        return {
+            "description": f"Command alerts for this server is set to `{bool(db.fetch('SELECT command_error FROM settings WHERE guildID=?', (ctx.guild.id,))[0])}`.", ###
+            "color": 65280
+        }
 
     ### work in progress
     template = {
         "header": {
-            "name": f"{' / '.join([x.title() for x in itertools.chain((ctx.guild.name,), args)])}",
+            "name": f"{' / '.join([x.title() for x in itertools.chain((ctx.guild.name,), ('Settings',), args)][:-1])}",
             "icon_url": str(ctx.guild.icon_url)
         },
-        "default": {
+        "main": {
             "embed": {
                 "title": "Settings",
                 "description": f"{ctx.prefix}set ..."
@@ -325,8 +445,8 @@ async def settings(ctx, *args, botmsg=None):
             "links": ['prefix', 'cmdalerts']
         },
         "prefix": {
+            "icon": "*️⃣",
             "title": "Prefix",
-            "icon": "1️⃣",
             "info": f"{ctx.prefix}",
             "action": {
                 "permission": ctx.author.guild_permissions.manage_guild,
@@ -334,8 +454,8 @@ async def settings(ctx, *args, botmsg=None):
             }
         },
         "cmdalerts": {
+            "icon": "⚠️",
             "title": "Command Alerts",
-            "icon": "2️⃣",
             "info":  f"{bool(setting(ctx, 'command_error'))}",
             "action": {
                 "permission": ctx.author.guild_permissions.manage_guild,
@@ -344,48 +464,9 @@ async def settings(ctx, *args, botmsg=None):
         }
     }
 
-    if not args:
-        embed = template['default']['embed']
-        embed['fields'] = []
-        userinput = {}
-        for name in template['default']['links']:
-            icon = template[name]['icon']
-            userinput[icon] = name
-            embed['fields'].append( {
-                "name": f"{icon} {template[name]['title']}",
-                "value": f"{name} {template[name]['info']}"
-            } )
-        userinput = interactive_embed.reaction(userinput)
-    else:
-        navigate = template[args[0]]
-        for arg in args[1:]:
-            if arg in navigate:
-                navigate = navigate[arg]
-            else:
-                if 'action' in navigate and navigate['action']['permission']:
-                    async with ctx.channel.typing():
-                        botmsg = None
-                        embed = navigate['action']['do'](*args[args.index(arg):]) ### will probably need a faster initiative
-                if 'links' in navigate:
-                    for name in template['default']['links']:
-                        icon = template[name]['icon']
-                        userinput[icon] = name
-                        embed['fields'].append( {
-                            "name": f"{icon} {template[name]['title']}",
-                            "value": f"{name} {template[name]['info']}"
-                        } )
-                    userinput = interactive_embed.reaction(userinput)
-        if not embed:
-            embed = {
-                "title": navigate['title'], 
-                "description": navigate['info'] 
-            }
-        if 'action' in navigate and not navigate['action']['permission']:
-            embed['footer'] = {'text': 'You do not have permission to change this setting'} ###
-
-    embed['author'] = template['header']
-    
+    embed, userinput = await interactive_embed.template(ctx, template, *args)
     embed = discord.Embed.from_dict(embed)
+
     if botmsg:
         await botmsg.edit(embed=embed)
     else:
