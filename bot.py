@@ -1,13 +1,18 @@
-import asyncio, concurrent, itertools, string, sqlite3
+import atexit
+import asyncio
+import concurrent
+import itertools
+import string
+import textwrap
+
 import discord
 from discord.ext import commands
-from collections import OrderedDict
-class hjson:
-    from hjson import dump, load
+import sqlite3
+import hjson
 
-''' Automation '''
 
 from sys import argv
+
 if len(argv) > 1 and argv[1] == "setup":
     print('Setting up...')
     with open('setup/config_copy.hjson', 'r') as copy:
@@ -16,9 +21,12 @@ if len(argv) > 1 and argv[1] == "setup":
             f.write(copy)
     print('Done! Refer back to README to complete the process.')
     exit()
+
 del argv
 
-'''File loader/saving'''
+
+
+''' File loader/saving '''
 
 def loaddisk(file):
     try:
@@ -26,16 +34,19 @@ def loaddisk(file):
             print(f'{file} accessed!')
             return hjson.load(f)
     except FileNotFoundError:
-        print(f"""Please follow the instructions found in README.md,
-        otherwise if error still occurs please report issues on GitHub.
-        Missing file: {file}""")
+        print(textwrap.dedent(
+            f"""Please follow the instructions found in README.md,
+            otherwise if error still occurs please report issues on GitHub.
+            Missing file: {file}"""))
         exit()
 
 def loaddb(file):
     print(f'{file} accessed!')
     return sqlite3.connect(file)
 
-def save(json=None, file=None, db=None):
+def save(
+        json=None, file=None, 
+        db=None):
     if json and file:
         with open(file, 'w') as f:
             print('Saving to disk..')
@@ -44,18 +55,24 @@ def save(json=None, file=None, db=None):
     if db:
         db.commit()
 
-async def autosave(json=None, file=None, interval=0, db=None):
+async def autosave(
+        json=None, file=None, 
+        interval=0, db=None):
     interval = interval*60
     while True:
         await asyncio.sleep(interval)
         save(json, file, db)
-        
+
 CONFIG = loaddisk('config.hjson')
+
 with open(f"{CONFIG['setup_directory']}/config_copy.hjson", 'r') as f:
     for key, value in hjson.load(f).items():
         if key not in CONFIG:
             CONFIG[key] = value
-            print(f'{key} is missing! Using values from config_copy.hjson. Please read README.md for more information.')
+            print(f'{key} is missing! Using values from config_copy.hjson. '
+                'Please read README.md for more information.')
+
+
 
 '''Special functions'''
 
@@ -67,7 +84,6 @@ def merge_dict(source, destination):
         else:
             destination[key] = value
             
-
 def nested_dict(source, destination):
     if len(source) > 1:
         node = destination.setdefault(source[0], {})
@@ -86,26 +102,34 @@ def bool_int(bool):
     return 1 if bool is True else 0
 
 def intersperse(delimiter, sequence):
-    return itertools.islice(itertools.chain.from_iterable(zip(itertools.repeat(delimiter), sequence)), 1, None)
+    return itertools.islice(
+        itertools.chain.from_iterable(
+            zip(itertools.repeat(delimiter),sequence)), 
+            1, None)
 
 '''Bot memory'''
 
 class db:
     conn = loaddb(CONFIG['dbfilename'])
     cursor = conn.cursor()
+    current_ver = cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]
+    with open(f"{CONFIG['setup_directory']}/db_maintenance.hjson") as f:
+        from collections import OrderedDict
+        for version, commands in hjson.load(
+                f, object_pairs_hook=OrderedDict).items():
+            if current_ver < int(version):
+                cursor.executescript(commands)
+
+        cursor.execute(f'PRAGMA user_version = {version};')
+        print("Database version "
+            f"{cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]}")
+
     def __new__(cls):
         return db.cursor
+
     def fetch(sql, *parameters):
         db.cursor.execute(sql, *parameters)
         return db.cursor.fetchone()
-
-    current_ver = cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]
-    with open(f"{CONFIG['setup_directory']}/db_maintenance.hjson") as f:
-        for version, commands in hjson.load(f, object_pairs_hook=OrderedDict).items():
-            if current_ver < int(version):
-                cursor.executescript(commands)
-        cursor.execute(f'PRAGMA user_version = {version};')
-        print(f"Database version {cursor.execute('PRAGMA user_version') and cursor.fetchone()[0]}")
 
 class json:
     json = loaddisk(CONFIG['filename'])
@@ -170,9 +194,12 @@ class setting:
             else:
                 db().execute(f'INSERT INTO settings ({item}, guildID) VALUES (?, ?);', (value, guild_id))
 
+
 def command_prefix(bot, ctx):
     owo = db.fetch('SELECT command_prefix FROM settings WHERE guildID=?;', (ctx.guild.id,))
     return owo if owo else CONFIG['defaultcommand_prefix']
+
+
 
 '''Bot Logic'''
 
@@ -241,10 +268,12 @@ class interactive_embed:
         def __init__(self, iterable, up=False):
             self.reactions = iterable
             self.up = up
+
     class message:
         def __init__(self, message, up=False):
             self.message = message
             self.up = up
+
 
     async def __new__(cls, ctx, botmsg, userinput):
         # replace isinstance with classes 
@@ -481,6 +510,5 @@ async def settings(ctx, *args, botmsg=None):
             await asyncio.create_task(settings(ctx, *args, path, botmsg=botmsg))
         await botmsg.clear_reactions()
 
-import atexit
 atexit.register(save, json(), CONFIG['filename'], db.conn)
 BOT.run(CONFIG['token'])
