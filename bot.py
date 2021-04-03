@@ -6,7 +6,7 @@ import string
 import textwrap
 
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import sqlite3
 import hjson
 
@@ -40,29 +40,6 @@ def loaddisk(file):
             Missing file: {file}"""))
         exit()
 
-def loaddb(file):
-    print(f'{file} accessed!')
-    return sqlite3.connect(file)
-
-def save(
-        json=None, file=None, 
-        db=None):
-    if json and file:
-        with open(file, 'w') as f:
-            print('Saving to disk..')
-            hjson.dump(json, f, indent=4)
-            print('Saved successfully!')
-    if db:
-        db.commit()
-
-async def autosave(
-        json=None, file=None, 
-        interval=0, db=None):
-    interval = interval*60
-    while True:
-        await asyncio.sleep(interval)
-        save(json, file, db)
-
 CONFIG = loaddisk('config.hjson')
 
 with open(f"{CONFIG['setup_directory']}/config_copy.hjson", 'r') as f:
@@ -71,6 +48,21 @@ with open(f"{CONFIG['setup_directory']}/config_copy.hjson", 'r') as f:
             CONFIG[key] = value
             print(f'{key} is missing! Using values from config_copy.hjson. '
                 'Please read README.md for more information.')
+
+def loaddb(file):
+    print(f'{file} accessed!')
+    return sqlite3.connect(file)
+
+
+@tasks.loop(minutes=CONFIG['autosaveinterval'])
+async def save(json=None, file=None, db=None):
+    if json and file:
+        with open(file, 'w') as f:
+            print('Saving to disk..')
+            hjson.dump(json, f, indent=4)
+            print('Saved successfully!')
+    if db:
+        db.commit()
 
 
 
@@ -208,8 +200,9 @@ BOT = commands.Bot(command_prefix=command_prefix)
 @BOT.event
 async def on_ready():
     print(f'Logged on as {BOT.user} ({BOT.user.id})')
-    if CONFIG['autosave']:
-        asyncio.create_task(autosave(json(), CONFIG['filename'], CONFIG['autosaveinterval'], db.conn))
+    # await BOT.change_presence(activity=discord.Game("with debuggers"))
+    if bool(CONFIG['autosave']):
+        save.start(json(), CONFIG['filename'], db.conn)
 
 @BOT.event
 async def on_message(message):
@@ -294,6 +287,8 @@ class interactive_embed:
             return str(reaction.emoji) in reactions and user.id is ctx.author.id and reaction.message.id == botmsg.id
         reaction, user = await BOT.wait_for('reaction_add', check=check, timeout=EMBED_TIMEOUT)
         emoji = str(reaction.emoji)
+        for task in tasks:
+            task.cancel()
 
         if emoji == '✏':
             await botmsg.clear_reactions()
@@ -305,7 +300,7 @@ class interactive_embed:
             await message.delete(delay=0) # delay puts task in background and ignores if it cant be deleted
             return message.content, botmsg
         elif emoji == '◀':
-            return '..'
+            return '..', botmsg
         elif emoji == '❎':
             await botmsg.clear_reactions()
             return 0, botmsg
@@ -341,6 +336,8 @@ class interactive_embed:
                         botmsg = None
                         embed = navigate['action']['do'](*args[args.index(arg):])
                         break
+                else:
+                    raise Exception('Unexpected argument')
             if not embed:
                 embed = {
                     "title": navigate['title'], 
@@ -352,7 +349,7 @@ class interactive_embed:
                 for name, dictionary in navigate.items():
                     icon = dictionary['icon']
                     title = dictionary['title']
-                    userinput[dictionary['icon']] = dictionary['title']
+                    userinput[dictionary['icon']] = name
                     embed['fields'].append( {
                         "name": f"{icon} {title}",
                         "value": f"{name} {dictionary['info']}"
@@ -422,11 +419,11 @@ async def make(ctx, *args, botmsg=None):
     if userinput:
         userinput.up = len(args) > 0
         path, botmsg = await interactive_embed(ctx, botmsg, userinput)
+        await botmsg.clear_reactions()
         if path == '..':
             await asyncio.create_task(make(ctx, *args[:-1], botmsg=botmsg))
         elif path:
             await asyncio.create_task(make(ctx, *args, path, botmsg=botmsg))
-        await botmsg.clear_reactions()
 
 
 @BOT.command(aliases=['set', 's'])

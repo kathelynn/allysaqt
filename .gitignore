@@ -4,3 +4,4 @@ allysaqt.db-journal
 config.hjson
 *.db
 oldbot.py
+.vscode/settings.json
